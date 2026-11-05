@@ -1,0 +1,44 @@
+{
+  "name": "vue-pointer-boxes",
+  "version": "1.0.0",
+  "description": "Vue component: simulated cursors roam the page, then drag elements open from their corners and type text in on scroll.",
+  "type": "module",
+  "main": "./dist/vue-pointer-boxes.umd.cjs",
+  "module": "./dist/vue-pointer-boxes.es.js",
+  "exports": {
+    ".": {
+      "import": "./dist/vue-pointer-boxes.es.js",
+      "require": "./dist/vue-pointer-boxes.umd.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && vite build --config vite.config.umd.js && node scripts/copy-umd.mjs",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "vue",
+    "vue3",
+    "animation",
+    "cursor",
+    "drag",
+    "scroll",
+    "gsap"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "vue": "^3.2.0"
+  },
+  "dependencies": {
+    "gsap": "^3.12.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "vite": "^5.4.11",
+    "vue": "^3.5.13"
+  }
+}
