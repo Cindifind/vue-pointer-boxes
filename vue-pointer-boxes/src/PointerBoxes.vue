@@ -1,5 +1,5 @@
 <template>
-  <div ref="rootEl" class="vpb-root" :style="rootStyle">
+  <div ref="rootEl" class="vpb-root" :class="{ 'vpb-hide-cursor': hideNativeCursor }" :style="rootStyle">
     <div ref="layerEl" class="vpb-pointer-layer" :style="layerStyle"></div>
 
     <!-- 用户自己写的 DOM，所有带 .vpb-box 的元素都会被自动识别 -->
@@ -19,10 +19,10 @@ const DIR_MAP = {
   right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1],
 }
 const CURSOR_SVG =
-  '<svg viewBox="0 0 32 32">' +
-  '<path d="M8 4L24 16L16 18L20 26L16 28L12 20L8 24L8 4Z" fill="currentColor"' +
-  ' stroke="#e8eaf2" stroke-width="1" stroke-linejoin="round" stroke-opacity="0.7"/>' +
-  '</svg>'
+    '<svg viewBox="0 0 32 32">' +
+    '<path d="M8 4L24 16L16 18L20 26L16 28L12 20L8 24L8 4Z" fill="currentColor"' +
+    ' stroke="#e8eaf2" stroke-width="1" stroke-linejoin="round" stroke-opacity="0.7"/>' +
+    '</svg>'
 
 const props = defineProps({
   selector: { type: String, default: '.vpb-box' },
@@ -41,6 +41,8 @@ const props = defineProps({
   maxSpeed: { type: Number, default: 1.1 },
   nearRadius: { type: Number, default: 150 },
   lockRadius: { type: Number, default: 90 },
+  // 等待中的 box 会召唤最近的空闲指针，以这个最高速（px/帧）直奔过去
+  seekSpeed: { type: Number, default: 7 },
   idleOpacity: { type: Number, default: 0.35 },
   nearOpacity: { type: Number, default: 0.75 },
   pointerZIndex: { type: Number, default: 9999 },
@@ -69,7 +71,6 @@ const layerEl = ref(null)
 
 const rootStyle = computed(() => ({
   background: props.background,
-  cursor: props.hideNativeCursor ? 'none' : 'auto',
   '--vpb-pointer-size': props.pointerSize + 'px',
   '--vpb-pointer-drag-size': props.pointerDragSize + 'px',
   '--vpb-idle-opacity': String(props.idleOpacity),
@@ -111,7 +112,8 @@ function readBoxConfig(el, knownText) {
     dir: parseDir(el.dataset.dir),
     rate: num(el.dataset.growthRate, 2.8),
     bigText: el.hasAttribute('data-big-text') || el.classList.contains('big-text-box'),
-    placeholder: el.dataset.placeholder || '·',
+    // data-placeholder 显式设置时以它为准（允许空字符串，拖拽中不显示占位符）
+    placeholder: el.dataset.placeholder !== undefined ? el.dataset.placeholder : '·',
     initW: num(el.dataset.initialWidth, props.initialWidth),
     initH: num(el.dataset.initialHeight, props.initialHeight),
     initR: num(el.dataset.initialRadius, props.initialRadius),
@@ -137,8 +139,8 @@ function getNaturalRect(b) {
 function setupBoxes() {
   boxes = []
   const scanNode = props.scanRoot
-    ? (typeof props.scanRoot === 'string' ? document.querySelector(props.scanRoot) : props.scanRoot)
-    : rootEl.value
+      ? (typeof props.scanRoot === 'string' ? document.querySelector(props.scanRoot) : props.scanRoot)
+      : rootEl.value
   if (!scanNode) return
 
   const allBoxEls = Array.from(scanNode.querySelectorAll(props.selector))
@@ -180,15 +182,21 @@ function setupBoxes() {
         inner.appendChild(span)
       }
       inner._span = span
+      inner._originText = span.textContent.trim()
 
       el.appendChild(inner)
       childBoxes.forEach((cb) => el.appendChild(cb))
     } else {
       span = inner._span || inner.querySelector('span.vpb-text')
+      // 首次扫描时缓存原始文本，restart 清空 span 后依然能找回
+      if (inner._originText === undefined) inner._originText = span ? span.textContent.trim() : ''
     }
 
-    // inner 创建好、文本搬好之后再读配置（此时能拿到正确的 span 文本）
-    const cfg = readBoxConfig(el, span ? span.textContent.trim() : '')
+    // inner 创建好、文本搬好之后再读配置（用缓存的原始文本，重播也不会丢）
+    const cfg = readBoxConfig(el, inner._originText ?? '')
+
+    // data-big-text 需要配套的 big-text-box 类才能启用换行样式
+    if (cfg.bigText && !el.classList.contains('big-text-box')) el.classList.add('big-text-box')
 
     // inner 始终用 absolute 定位在 el 的 (0,0)，动画时改 width/height/left/top
     inner.style.position = 'absolute'
@@ -254,7 +262,6 @@ function resetBox(b) {
   b.inner.style.borderRadius = b.cfg.initR + 'px'
   b.inner.style.left = ''
   b.inner.style.top = ''
-  b.span.style.fontSize = '0.9rem'
   b.span.style.opacity = '1'
   b.span.innerHTML = ''
   b.span.textContent = b.cfg.placeholder
@@ -284,7 +291,7 @@ function initPointers() {
     pointers.push({
       el: div, x, y,
       vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
-      hue, lockedBox: -1, cooldown: 0, typing: false,
+      hue, lockedBox: -1, cooldown: 0, typing: false, chaseBox: -1,
     })
   }
 }
@@ -298,6 +305,7 @@ function startDrag(b, pointerIdx) {
 
   b.state = 2; b.dragPointerIdx = pointerIdx; b.stretch = 0
   p.lockedBox = b.i
+  p.chaseBox = -1
   p.el.classList.add('dragging'); p.el.classList.remove('near')
   p.el.style.color = brightColor(p.hue)
   b.el.classList.add('dragging')
@@ -393,9 +401,13 @@ function startTyping(b, pointerIdx) {
   }
 
   b.span.style.opacity = '1'
-  b.span.style.fontSize = b.cfg.bigText ? '0.82rem' : '1.8rem'
   b.span.innerHTML = ''
   for (const ch of text) {
+    // 换行符直接插入 <br>，不参与逐字动画
+    if (ch === '\n') {
+      b.span.appendChild(document.createElement('br'))
+      continue
+    }
     const c = document.createElement('span')
     c.className = 'vpb-char'
     c.textContent = ch
@@ -449,6 +461,8 @@ function startTyping(b, pointerIdx) {
 }
 
 function readText(b) {
+  // data-text 显式设置时以它为准（允许空字符串，表示只展示图片、不显示文字）
+  if (b.el.dataset.text !== undefined) return b.el.dataset.text.trim()
   if (b.cfg.text && b.cfg.text.trim()) return b.cfg.text.trim()
   return b.span.textContent.trim()
 }
@@ -461,6 +475,26 @@ function tick() {
 
   // 1. 指针游走
   for (const p of pointers) {
+    // 被等待中的 box 召唤：直线加速飞过去，不再靠随机游走碰运气
+    if (p.chaseBox >= 0) {
+      const b = boxes[p.chaseBox]
+      if (!b || b.state !== 1) {
+        p.chaseBox = -1
+      } else {
+        const r = getNaturalRect(b)
+        const dx = r.left + r.width / 2 - p.x
+        const dy = r.top + r.height / 2 - p.y
+        const d = Math.hypot(dx, dy) || 1
+        const speed = Math.min(props.seekSpeed, Math.max(2, d * 0.06))
+        p.x += (dx / d) * speed
+        p.y += (dy / d) * speed
+        p.el.classList.add('near')
+        p.el.style.left = p.x.toFixed(1) + 'px'
+        p.el.style.top = p.y.toFixed(1) + 'px'
+        continue
+      }
+    }
+
     if (p.lockedBox >= 0 || p.typing) continue
     if (p.cooldown > 0) {
       p.cooldown--
@@ -503,6 +537,8 @@ function tick() {
     for (let i = 0; i < pointers.length; i++) {
       const pp = pointers[i]
       if (pp.lockedBox >= 0 || pp.cooldown > 0 || pp.typing) continue
+      // 已被其他 box 召唤的指针不再参与竞争
+      if (pp.chaseBox >= 0 && pp.chaseBox !== b.i) continue
       const d = Math.hypot(pp.x - cx, pp.y - cy)
       if (d < bestDist) { bestDist = d; bestIdx = i }
     }
@@ -516,7 +552,12 @@ function tick() {
       const pull = 0.08 * (1 - bestDist / props.nearRadius)
       np.vx += (dx / d) * pull; np.vy += (dy / d) * pull
     }
-    if (bestDist < props.lockRadius) startDrag(b, bestIdx)
+    if (bestDist < props.lockRadius) {
+      startDrag(b, bestIdx)
+    } else {
+      // 还在远处：直接指派它高速奔向这个 box
+      np.chaseBox = b.i
+    }
   }
 
   // 3. 拖拽中：每帧重算 inner 位置 + pointer 位置
@@ -555,8 +596,7 @@ function tick() {
     b.inner.style.left = innerLeft.toFixed(1) + 'px'
     b.inner.style.top = innerTop.toFixed(1) + 'px'
 
-    // 放大过程中只显示占位符
-    b.span.style.fontSize = '0.9rem'
+    // 放大过程中只显示占位符（字号由 CSS 控制，方便外部覆盖）
     b.span.textContent = b.cfg.placeholder
 
     dp.el.style.left = dp.x.toFixed(1) + 'px'
@@ -585,7 +625,7 @@ function tick() {
       const r = getNaturalRect(b)
       const ir = b.inner.getBoundingClientRect()
       const err = Math.abs(ir.left - r.left) + Math.abs(ir.top - r.top) +
-        Math.abs(ir.width - b.cfg.finalW) + Math.abs(ir.height - b.cfg.finalH)
+          Math.abs(ir.width - b.cfg.finalW) + Math.abs(ir.height - b.cfg.finalH)
       if (err > 4) {
         const elRect = b.el.getBoundingClientRect()
         b.inner.style.left = (r.left - elRect.left) + 'px'
@@ -650,6 +690,8 @@ function teardown() {
 }
 
 function restart() {
+  // 先复位旧盒子（清 show/done 类与残留文字），避免重播时样式与文本错乱
+  boxes.forEach((b) => resetBox(b))
   teardown()
   setupBoxes()
   initPointers()

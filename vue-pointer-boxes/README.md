@@ -9,7 +9,7 @@
 - **边角拖拽**：指针从指定角落把元素拉开展开
 - **逐字打字**：拖拽完成后文字逐个浮现
 - **大文本支持**：长文本自动慢速 stagger 打字，指针变 I 形光标
-- **自包含样式**：组件内部注入 CSS，无需额外引入样式文件
+- **自包含样式**：组件内部注入 CSS，无需额外引入样式文件（样式位于 `@layer`，外部样式可直接覆盖）
 - **双格式分发**：ESM（构建环境）+ UMD（CDN / script 标签直引）
 
 ## 安装
@@ -144,7 +144,7 @@ import PointerBoxes from 'vue-pointer-boxes'
 | `idleOpacity` | Number | `0.35` | 指针空闲透明度 |
 | `nearOpacity` | Number | `0.75` | 指针靠近元素时透明度 |
 | `pointerZIndex` | Number | `9999` | 指针层层级 |
-| `hideNativeCursor` | Boolean | `true` | 是否隐藏系统鼠标光标 |
+| `hideNativeCursor` | Boolean | `true` | 是否隐藏系统光标（通过 `.vpb-hide-cursor` 类控制，外部样式可覆盖） |
 | `normalStagger` | Number | `0.14` | 普通文本打字间隔（秒） |
 | `bigTextStagger` | Number | `0.045` | 大文本打字间隔（秒） |
 | `typeDelay` | Number | `700` | 拖拽完成后打字延迟（毫秒） |
@@ -218,21 +218,31 @@ function onTyped({ index, text }) {
 </script>
 ```
 
-## 自定义样式
+## 样式定制
 
-组件注入的 CSS 类可通过更高优先级的选择器覆盖：
+组件注入的样式全部位于 `@layer vue-pointer-boxes` 中。按照 CSS 级联层规则，宿主页面里未分层的普通样式优先级更高，直接写选择器即可覆盖组件内部 DOM，无需提高权重或加 `!important`：
 
 ```css
-/* 已完成元素的边框颜色 */
-.vpb-box.done .vpb-inner {
-  border-color: #4caf50 !important;
+/* 元素底色 */
+.vpb-inner {
+  background: #fffdf5;
 }
 
-/* 拖拽中元素的阴影 */
-.vpb-box.dragging .vpb-inner {
-  box-shadow: 0 10px 40px rgba(76, 175, 80, .4) !important;
+/* 已完成元素的边框颜色 */
+.vpb-box.done .vpb-inner {
+  border-color: #4caf50;
 }
 ```
+
+常用样式变量（定义在 `.vpb-root` 或任意祖先上即可）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `--vpb-font-size` | `1.8rem` | 普通文本字号 |
+| `--vpb-big-font-size` | `.82rem` | 大文本字号 |
+| `--vpb-inner-bg` | `#fff` | 元素底色 |
+| `--vpb-text-color` | `#5a5e75` | 文本颜色 |
+| `--vpb-done-color` | `#3a7a65` | 完成态文本颜色 |
 
 ## 常见问题
 
