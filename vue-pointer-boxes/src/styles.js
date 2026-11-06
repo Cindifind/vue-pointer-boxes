@@ -89,6 +89,10 @@ const CSS = `
 .vpb-box.vpb-md-code{margin:0 0 .9em;padding:0;background:none;border:0;overflow:visible;box-sizing:border-box;font-family:var(--vpb-mono-font,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:var(--vpb-md-code-font-size,.78rem);line-height:var(--vpb-md-code-line-height,1.7);white-space:pre;}
 .vpb-box.vpb-md-code .vpb-inner{padding:var(--vpb-md-code-padding,12px 14px);justify-content:flex-start;}
 .vpb-box.vpb-md-code .vpb-inner .vpb-text{white-space:pre;overflow:auto;text-align:left;scrollbar-width:none;-ms-overflow-style:none;}
+/* 代码块里的字符用行内盒：pre 里每个字符再套一个 inline-block 盒子，一行代码就被切成
+   几十个独立盒子，逐字动画时整块重排；行内盒不改变排版，组件对代码块只发透明度，
+   不发 transform / filter，因此也不会为每个字符新建合成层 */
+.vpb-box.vpb-md-code .vpb-inner .vpb-char{display:inline;white-space:pre;vertical-align:baseline;}
 .vpb-box.vpb-md-code .vpb-inner .vpb-text::-webkit-scrollbar{width:0;height:0;display:none;}
 .vpb-box.vpb-md-code.done .vpb-inner .vpb-text{overflow:auto;}
 .vpb-rich img{display:block;max-width:100%;height:auto;margin:.4em 0;border-radius:6px;}

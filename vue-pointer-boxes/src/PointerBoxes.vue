@@ -179,6 +179,9 @@ function refreshRects() {
     const r = b.el.getBoundingClientRect()
     b.rect.left = r.left
     b.rect.top = r.top
+    // 宽度也缓存：代码块要跟随父级内容列，展开前要按它校正 finalW，
+    // 存下来就不必在 showBox / startDrag 里再读一次 offsetWidth（那是一次强制布局）
+    b.rect.w = r.width
   }
   rectsDirty = false
 }
@@ -210,11 +213,15 @@ function prepareMarkdownBoxes(scanNode) {
 
     // 代码块宽度跟随父级内容列；高度此刻就能量准（字号 / 行高由 .vpb-box.vpb-md-code 决定），
     // 先写死高度腾出排版位置，父级卡片量自然高度时才算得对
-    el.querySelectorAll('.vpb-md-code').forEach((box) => {
-      box.style.width = '100%'
-      const h = box.offsetHeight || 0
-      box.dataset.height = String(Math.max(1, Math.ceil(h + CODE_BOX_PAD * 2)))
-      box.style.height = box.dataset.height + 'px'
+    // 读写分离：原来每个代码块「写宽度 → 量高度 → 写高度」，文档里有几个代码块就有几次
+    // 强制同步布局；改成先统一写宽度、再统一量、最后统一写高度
+    const codeBoxes = Array.from(el.querySelectorAll('.vpb-md-code'))
+    codeBoxes.forEach((box) => { box.style.width = '100%' })
+    const codeHeights = codeBoxes.map((box) =>
+        Math.max(1, Math.ceil((box.offsetHeight || 0) + CODE_BOX_PAD * 2)))
+    codeBoxes.forEach((box, k) => {
+      box.dataset.height = String(codeHeights[k])
+      box.style.height = codeHeights[k] + 'px'
     })
   })
 }
@@ -366,7 +373,7 @@ function setupBoxes() {
     boxes.push({
       i, el, inner, span: inner._span || inner.querySelector('span.vpb-text'),
       cfg, autoHeight,
-      rect: { left: 0, top: 0 },
+      rect: { left: 0, top: 0, w: 0 },
       parentIdx: -1, children: [],
       state: 0, stretch: 0,
       maxStretch: Math.max(cfg.finalW - cfg.initW, cfg.finalH - cfg.initH, 1),
@@ -404,7 +411,7 @@ function isParentReady(b) {
 // Markdown 代码块的宽度跟随父级内容列，激活 / 拖拽前按当前布局刷新一次
 function refreshBoxWidth(b) {
   if (!b.el.classList.contains('vpb-md-code')) return
-  const w = Math.round(b.el.offsetWidth)
+  const w = Math.round(b.rect.w || 0)
   if (!w || Math.abs(w - b.cfg.finalW) <= 2) return
   b.cfg.finalW = w
   b.maxStretch = Math.max(w - b.cfg.initW, b.cfg.finalH - b.cfg.initH, 1)
@@ -533,10 +540,11 @@ function startDrag(b, pointerIdx) {
   b.el.classList.add('dragging')
   emit('dragstart', { index: b.i })
 
-  // 实时取 inner 在屏幕上的最终位置
-  const r = getNaturalRect(b)
-  const scx = r.left + b.cfg.finalW / 2
-  const scy = r.top + b.cfg.finalH / 2
+  // 位置直接取本帧缓存（tick 在帧首刷新），不在这里再量一次 rect
+  const elLeft = b.rect.left
+  const elTop = b.rect.top
+  const scx = elLeft + b.cfg.finalW / 2
+  const scy = elTop + b.cfg.finalH / 2
   const dir = b.cfg.dir
   const signX = Math.sign(dir[0]) || 1
   const signY = Math.sign(dir[1]) || 1
@@ -555,11 +563,10 @@ function startDrag(b, pointerIdx) {
   b._signX = signX; b._signY = signY
 
   // inner 放到锚点位置（相对于 el），尺寸初始
-  const elRect = b.el.getBoundingClientRect()
-  let innerLeft = signX >= 0 ? ax - elRect.left : ax - elRect.left - b.cfg.initW
-  let innerTop = signY >= 0 ? ay - elRect.top : ay - elRect.top - b.cfg.initH
-  if (signX === 0) innerLeft = scx - elRect.left - b.cfg.initW / 2
-  if (signY === 0) innerTop = scy - elRect.top - b.cfg.initH / 2
+  let innerLeft = signX >= 0 ? ax - elLeft : ax - elLeft - b.cfg.initW
+  let innerTop = signY >= 0 ? ay - elTop : ay - elTop - b.cfg.initH
+  if (signX === 0) innerLeft = scx - elLeft - b.cfg.initW / 2
+  if (signY === 0) innerTop = scy - elTop - b.cfg.initH / 2
 
   b.inner.style.position = 'absolute'
   b.inner.style.left = innerLeft + 'px'
@@ -575,11 +582,10 @@ function startDrag(b, pointerIdx) {
 }
 
 function finishDrag(b) {
-  const r = getNaturalRect(b)
-  const elRect = b.el.getBoundingClientRect()
-
-  b.inner.style.left = (r.left - elRect.left) + 'px'
-  b.inner.style.top = (r.top - elRect.top) + 'px'
+  // inner 的最终位置就是 el 的左上角：原写法量两次 rect 再相减，恒为 0，
+  // 却各触发一次强制同步布局（收盒时卡一下）
+  b.inner.style.left = '0px'
+  b.inner.style.top = '0px'
   b.inner.style.width = b.cfg.finalW + 'px'
   b.inner.style.height = b.cfg.finalH + 'px'
   b.inner.style.borderRadius = b.cfg.finalR + 'px'
@@ -610,14 +616,29 @@ function finishDrag(b) {
 }
 
 // ======= 打字 =======
-// 逐字动画的起止态：字符多时去掉 blur，只留位移 + 缩放 + 透明度
-const charFrom = (n) => n > props.blurCharLimit
-    ? { opacity: 0, y: 6, scale: 0.92 }
-    : { opacity: 0, y: 8, scale: 0.7, filter: 'blur(3px)' }
-const charTo = (n) => n > props.blurCharLimit
-    ? { opacity: 1, y: 0, scale: 1 }
-    : { opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }
-const charClear = (n) => n > props.blurCharLimit ? 'opacity,transform' : 'opacity,transform,filter'
+// 逐字动画的起止态：字符多时去掉 blur，只留位移 + 缩放 + 透明度。
+// 逐字模糊要逐个字符单独栅格化，开销随字符数线性增长。
+function charAnim(n) {
+  const blur = n <= props.blurCharLimit
+  return blur
+      ? {
+        from: { opacity: 0, y: 8, scale: 0.7, filter: 'blur(3px)' },
+        to: { opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' },
+        clear: 'opacity,transform,filter',
+      }
+      : {
+        from: { opacity: 0, y: 6, scale: 0.92 },
+        to: { opacity: 1, y: 0, scale: 1 },
+        clear: 'opacity,transform',
+      }
+}
+
+// 代码块专用：字符是行内盒（见 styles.js），transform 对行内盒无效，
+// 只做透明度 —— 不新建合成层，也不触发 filter 的逐帧重栅格化。
+// 代码块字符通常一两百个，正好落在 blurCharLimit 以内，不特殊处理就是全页最卡的地方。
+const CODE_ANIM = { from: { opacity: 0 }, to: { opacity: 1 }, clear: 'opacity' }
+
+const isCodeBox = (el) => el.classList.contains('vpb-md-code') || el.tagName === 'PRE'
 
 function endTyping(b, pointerIdx) {
   if (pointerIdx >= 0 && pointers[pointerIdx]) {
@@ -648,9 +669,10 @@ function focusPointer(b, pointerIdx, span) {
   p.vx = 0; p.vy = 0
   p.cooldown = span + 120
   p.el.classList.add('typing-cursor')
-  const r = getNaturalRect(b)
-  const targetX = r.left + r.width / 2
-  const targetY = r.top + r.height / 2
+  // 用缓存矩形（tick 每帧维护）。这里若再 getBoundingClientRect，
+  // 等于把刚插入的几百个字符同步排版一次 —— 就是「开始打字那一下」的长任务
+  const targetX = b.rect.left + b.cfg.finalW / 2
+  const targetY = b.rect.top + b.cfg.finalH / 2
   tweens.push(gsap.to(p, {
     x: targetX, y: targetY, duration: 0.6, ease: 'power2.out',
     onUpdate: () => setPointerPos(p),
@@ -663,20 +685,25 @@ function startTyping(b, pointerIdx) {
   const text = readText(b)
   if (!text) { endTyping(b, pointerIdx); return }
 
+  const isCode = isCodeBox(b.el)
   b.span.style.opacity = '1'
-  b.span.innerHTML = ''
+
+  // fragment 一次性替换：逐个 appendChild 时每个字符都会让样式失效一次
+  const frag = document.createDocumentFragment()
+  const chars = []
   for (const ch of text) {
     // 换行符直接插入 <br>，不参与逐字动画
     if (ch === '\n') {
-      b.span.appendChild(document.createElement('br'))
+      frag.appendChild(document.createElement('br'))
       continue
     }
     const c = document.createElement('span')
     c.className = 'vpb-char'
     c.textContent = ch
-    b.span.appendChild(c)
+    frag.appendChild(c)
+    chars.push(c)
   }
-  const chars = Array.from(b.span.querySelectorAll('.vpb-char'))
+  b.span.replaceChildren(frag)
   b.el.classList.add('typing')
   if (!chars.length) {
     endTyping(b, pointerIdx)
@@ -687,9 +714,12 @@ function startTyping(b, pointerIdx) {
 
   // 起始态交给 GSAP，结束时 clearProps —— 终态样式仍由外部 CSS 决定
   const n = chars.length
-  gsap.set(chars, charFrom(n))
+  const anim = isCode ? CODE_ANIM : charAnim(n)
+  gsap.set(chars, anim.from)
 
-  const stagger = b.cfg.stagger ?? (b.cfg.bigText ? props.bigTextStagger : props.normalStagger)
+  const baseStagger = b.cfg.stagger ?? (b.cfg.bigText ? props.bigTextStagger : props.normalStagger)
+  // 代码块长度不可控：3000 字按 data-stagger 要写 36 秒，看着像卡死；总时长封顶 8 秒
+  const stagger = isCode ? Math.min(baseStagger, 8 / n) : baseStagger
   const tl = gsap.timeline({
     delay: props.typeDelay / 1000,
     onComplete: () => {
@@ -699,10 +729,10 @@ function startTyping(b, pointerIdx) {
   })
   tweens.push(tl)
   tl.to(chars, {
-    ...charTo(n),
-    duration: 0.22, ease: 'back.out(1.5)', stagger,
+    ...anim.to,
+    duration: isCode ? 0.18 : 0.22, ease: isCode ? 'none' : 'back.out(1.5)', stagger,
   })
-  tl.set(chars, { clearProps: charClear(n) })
+  tl.set(chars, { clearProps: anim.clear })
 }
 
 // 富文本：保留标签结构，只让文字逐个浮现，图片 / 分割线等整体淡入
@@ -753,12 +783,13 @@ function startRichTyping(b, pointerIdx) {
 
   if (chars.length) {
     const n = chars.length
-    gsap.set(chars, charFrom(n))
+    const anim = charAnim(n)
+    gsap.set(chars, anim.from)
     tl.to(chars, {
-      ...charTo(n),
+      ...anim.to,
       duration: 0.22, ease: 'back.out(1.5)', stagger,
     })
-    tl.set(chars, { clearProps: charClear(n) })
+    tl.set(chars, { clearProps: anim.clear })
   }
 
   media.forEach((m) => {
@@ -990,8 +1021,8 @@ function onResize() {
   clearTimeout(resizeTimer)
   resizeTimer = setTimeout(() => {
     initPointers()
-    // 视口变了，所有缓存位置作废
-    markRectsDirty()
+    // 视口变了，缓存位置作废：这里立刻重量一轮，因为 refreshBoxWidth 读的是缓存宽度
+    refreshRects()
     boxes.forEach((b) => {
       refreshBoxWidth(b)
       refreshAutoHeight(b)

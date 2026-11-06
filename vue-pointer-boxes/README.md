@@ -14,6 +14,22 @@
 - **自包含样式**：组件内部注入 CSS，无需额外引入样式文件（样式位于 `@layer`，外部样式可直接覆盖）
 - **双格式分发**：ESM（构建环境）+ UMD（CDN / script 标签直引）
 
+## 版本对应关系
+
+本文档描述的是 **v1.1.1**。npm 上的旧版本能力更少，按本文档写会「属性被忽略、内容按纯文本输出」：
+
+| 能力 | 起始版本 | 旧版本表现 |
+|------|----------|------------|
+| `text` 模式基础动画 | 1.0.0 | — |
+| 富文本 / Markdown / 字体继承 / `@layer` 样式 / `blurCharLimit` / Markdown 代码块子 box | **1.1.1** | `mode` / `data-mode` / `data-html` 无效，内容按 `text` 模式打字；样式不带 `@layer` |
+
+```bash
+npm view vue-pointer-boxes versions   # 先确认目标版本已发布
+npm install vue-pointer-boxes@1.1.1
+```
+
+> 1.1.0 是用旧源码构建发布的：dist 里搜不到 `markdown` / `data-mode` / `@layer` 等实现。升级到 1.1.1 后，本文档的内容模式、代码块子 box、样式层覆盖才真正可用。
+
 ## 安装
 
 ```bash
@@ -368,6 +384,7 @@ function onTyped({ index, text }) {
 - **拖拽期间正文摘出布局**：富文本盒子拉伸时只显示占位符，上千个节点不会跟着每帧变化的宽高重排
 - **静止态指针不加滤镜**：每个指针都是独立合成层，`filter: blur/drop-shadow` 会让它每帧重新栅格化；光晕只在靠近 / 拖拽时出现
 - **逐字模糊有上限**：字符数超过 `blurCharLimit` 时自动降级（见上文）
+- **代码块不拆成字符盒**：`vpb-md-code` 里的字符是行内盒（`display:inline`），只做透明度淡入，不带 `transform` / `filter`；开盒、收盒、开始打字都不再强制同步布局（位置与宽度全部读缓存）
 
 指针数量和字号是最大的两个变量：`pointer-count` 每增加一倍，每帧的样式写入与合成层也翻一倍；长文本建议配 `data-stagger` 控制节奏，而不是单纯堆字符。
 
@@ -421,6 +438,15 @@ A：`background-clip: text` 的渐变如果只写在 `.vpb-text` 上，字符一
 ```
 
 `background-position` 的百分比是相对「元素宽 − 图片宽」算的，图片被撑到「字符数 × 自身宽」后为负值，正好把第 i 个字符推进它自己那一段。不支持这两个函数的内核会退回普通纯色，不会出现彩色断层。
+
+## 发布
+
+`dist/` 不入库（见 `.gitignore`），发布包完全由本地构建生成——“README 有、dist 没有”只可能来自发布了旧产物。仓库为此加了两道闸：
+
+- `npm run build` 会先清空 `dist/`（`prebuild` → `npm run clean`）。注意 `build.emptyOutDir` 本身靠不住：Windows + Node 24 上同步的 `fs.rmSync(recursive)` 在项目路径上会原生崩溃（`0xC0000409`，日志停在 `N modules transformed`，崩在删除内部而非退出期），所以产物目录由 `scripts/clean.mjs` 在 Vite 启动前用异步 `rm`（带 `maxRetries` / `retryDelay` 重试）删掉。
+- `npm pack` / `npm publish` 触发 `prepack`：强制「重建 + `npm run check:dist`」。自检看三件事：产物里是否有 `markdown` / `@layer` / `blurCharLimit` / `vpb-md-code` 等标记，`dist/build-info.json` 的版本号是否等于 `package.json`，`umd.cjs` 是否与 `umd.js` 一致。任一项不满足直接失败。
+
+版本号必须手动递增（同一版本号 npm 不允许覆盖），`build-info.json` 里的版本戳来自 `package.json`，所以忘了升版会把旧包当成新版本发出去。
 
 ## License
 
