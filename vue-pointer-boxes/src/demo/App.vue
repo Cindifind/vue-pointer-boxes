@@ -129,8 +129,44 @@
           {{ copy.apiHeading }}
         </div>
 
-        <div class="vpb-box vpb-code vpb-api" data-dir="tl" data-growth-rate="4" data-big-text>
+        <div class="vpb-box vpb-code vpb-api" data-dir="tl" data-growth-rate="4" data-height="auto" data-big-text>
           {{ apiText }}
+        </div>
+
+        <!-- ============ 05 富文本与字体 ============ -->
+        <div class="vpb-box vpb-ink vpb-heading" data-dir="right" data-growth-rate="4">
+          {{ copy.richHeading }}
+        </div>
+
+        <div class="vpb-box vpb-ink vpb-body" data-dir="tr" data-growth-rate="4" data-big-text>
+          {{ copy.richNote }}
+        </div>
+
+        <div
+          class="vpb-box md-card"
+          data-mode="markdown"
+          data-dir="br"
+          data-growth-rate="3.4"
+          data-big-text
+        >
+          {{ mdSample }}
+        </div>
+
+        <div
+          class="vpb-box font-card"
+          data-mode="html"
+          data-height="auto"
+          data-dir="tl"
+          data-growth-rate="3.4"
+          data-big-text
+        >
+          <p><strong>字体继承</strong>：这一段用 <code>font-family</code> 指定了衬线字体，组件内部原样继承。</p>
+          <p>
+            <em>Italic serif</em> ·
+            <a :href="github" target="_blank" rel="noreferrer">可点击链接</a> ·
+            <code>monospace</code> · <del>删除线</del>
+          </p>
+          <p class="font-card-note">字号 / 字重 / 行高 / 字距全部来自宿主 CSS，无需 !important</p>
         </div>
 
         <!-- ============ 页脚 ============ -->
@@ -173,6 +209,9 @@ const copy = {
   usageNote:
     '给元素加上 class="vpb-box"，其余交给组件：自动扫描、注入动画层、读取元素宽高作为最终形态。data-dir 支持 8 个方向，嵌套的子元素会等父元素完成后才被激活。',
   apiHeading: '04 · API 摘要',
+  richHeading: '05 · 富文本与字体',
+  richNote:
+    '富文本不再被拍平成字符串：文本节点逐个浮现，标题、段落、列表、链接、代码块的原生结构完整保留。字体也全部继承宿主，组件不再写死字号与字族。',
   footer: 'vue-pointer-boxes · MIT License · github.com/Cindifind/vue-pointer-boxes',
 }
 
@@ -220,14 +259,51 @@ hideNativeCursor  Boolean  true     隐藏系统光标
 normalStagger     Number   0.14     普通文本打字间隔
 bigTextStagger    Number   0.045    大文本打字间隔
 data-dir          8 方向：br tr bl tl / right left down up
-data-width/height 覆盖元素最终尺寸
+data-width/height 覆盖最终尺寸，height 可写 auto
 data-big-text     大文本：慢速打字 + I 形光标
 data-text         强制指定打字内容
+data-stagger      覆盖逐字间隔（秒）
 css               @layer vue-pointer-boxes，外部样式可直接覆盖
-vars              --vpb-font-size · --vpb-big-font-size · --vpb-inner-bg
+vars              --vpb-font-family · --vpb-font-size · --vpb-line-height
+
+mode              auto / text / html / markdown   内容模式
+splitUnit         char | word   逐字粒度，word 保留连字
+markdown          Function      自定义 Markdown 渲染器
+richCharLimit     Number  3000  超长内容改为整体淡入
+interactive       Boolean true  完成后可选中、点链接、滚动
+
+md code           Markdown 围栏代码块 → 可拖拽子 box；卡片高度随内容平铺
+
+style             字体全部继承宿主（font: inherit）
 
 events  ready · dragstart · dragend · typed
 method  restart() 重置并重播整段动画`
+
+// Markdown 演示内容：由内置渲染器转换后，再按标签结构逐字写出
+const mdSample = `## Markdown 也能逐字生成
+
+这一整段内容来自一段 **Markdown 源码**，由内置渲染器转换后，再按标签结构逐字写出。\`data-mode="markdown"\` 即可启用。
+
+- 标题、段落、列表仍保留原生语义
+- **加粗**、*斜体*、\`行内代码\` 各自继承宿主字体
+- 图片与分割线整体淡入，不参与拆字
+- 围栏代码块会自己变成一个可拖拽的盒子，等这段写完再由指针拉开
+- 标题、段落、列表仍保留原生语义
+- **加粗**、*斜体*、\`行内代码\` 各自继承宿主字体
+- 图片与分割线整体淡入，不参与拆字
+- 围栏代码块会自己变成一个可拖拽的盒子，等这段写完再由指针拉开
+> 也可以传入 markdown-it / marked 的渲染函数接管解析。
+- 标题、段落、列表仍保留原生语义
+- **加粗**、*斜体*、\`行内代码\` 各自继承宿主字体
+- 图片与分割线整体淡入，不参与拆字
+- 围栏代码块会自己变成一个可拖拽的盒子，等这段写完再由指针拉开
+~~~js
+<PointerBoxes>
+  <div class="vpb-box" data-mode="markdown">
+    ## 标题
+  </div>
+</PointerBoxes>
+~~~`
 </script>
 
 <style>
@@ -300,6 +376,23 @@ body {
   font-size: clamp(2rem, 5.6vw, 3rem);
   font-weight: 800;
   letter-spacing: 1px;
+}
+
+/* 主标题渐变。渐变必须落在每个字符上，不能只写在 .vpb-text 上：
+   字符一旦因 opacity < 1 独立成合成层，父层被字形裁切的渐变就失去字形，
+   淡入中途会整段消失。这里用 sibling-count() / sibling-index() 把渐变按字符均分：
+   background-size 撑成「字符数 × 自身宽」，background-position 的百分比是相对
+   （元素宽 − 图片宽）算的，图片比元素宽时为负值，正好把第 i 个字符推到它自己那段。 */
+@supports (background-size: calc(100% * sibling-count()) 100%) {
+  .vpb-box.vpb-title .vpb-char {
+    background-image: linear-gradient(90deg, #3d5afe 0%, #7c4dff 50%, #18b6c9 100%);
+    background-size: calc(100% * sibling-count()) 100%;
+    background-position: calc(100% * (sibling-index() - 1) / max(1, sibling-count() - 1)) 0;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+  }
 }
 
 /* 引导语 */
@@ -441,7 +534,6 @@ body {
 
 .vpb-api {
   width: min(760px, 92vw);
-  height: 330px;
   margin-top: 18px;
 }
 
@@ -524,6 +616,71 @@ body {
   margin-top: 60px;
 }
 
+/* ================= 富文本演示 ================= */
+.md-card {
+  width: min(760px, 92vw);
+  border-radius: 18px;
+  background: #fff;
+  margin-top: 18px;
+  font-size: 0.9rem;
+  line-height: 1.85;
+  letter-spacing: 0;
+}
+
+.vpb-box.md-card .vpb-inner {
+  justify-content: flex-start;
+  padding: 24px 28px;
+  background: #fff;
+  border-color: #dde1ef;
+}
+
+/* Markdown 里的代码块：库已把它升级成独立的 .vpb-box，这里只管配色 */
+.vpb-box.vpb-md-code .vpb-inner {
+  padding: 12px 14px;
+  background: #1e2130;
+  border-color: #2a2e42;
+  box-shadow: 0 8px 22px rgba(30, 33, 48, 0.14);
+}
+
+.vpb-box.vpb-md-code.done .vpb-inner {
+  background: #1e2130;
+  border-color: #2a2e42;
+  box-shadow: 0 14px 34px rgba(30, 33, 48, 0.22);
+}
+
+.vpb-box.vpb-md-code .vpb-inner .vpb-text {
+  color: #d7dbee;
+  letter-spacing: 0;
+  text-align: left;
+}
+
+.vpb-box.vpb-md-code .vpb-placeholder {
+  color: #d7dbee;
+}
+
+.font-card {
+  width: min(760px, 92vw);
+  border-radius: 18px;
+  background: #fffdf7;
+  margin-top: 18px;
+  font-family: Georgia, 'Times New Roman', 'Songti SC', 'SimSun', serif;
+  font-size: 17px;
+  line-height: 1.9;
+}
+
+.vpb-box.font-card .vpb-inner {
+  justify-content: flex-start;
+  padding: 22px 26px;
+  background: #fffdf7;
+  border-color: #e6dcc4;
+}
+
+.vpb-rich .font-card-note {
+  color: #9a9a8a;
+  font-size: 0.82em;
+  letter-spacing: 0.4px;
+}
+
 /* ================= 响应式 ================= */
 @media (max-width: 640px) {
   .vpb-label {
@@ -553,7 +710,7 @@ body {
     height: 300px;
   }
   .vpb-api {
-    height: 520px;
+    width: 92vw;
   }
   .vpb-foot {
     height: 60px;

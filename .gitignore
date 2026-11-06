@@ -1,0 +1,43 @@
+# ---------- 依赖 / 包管理器 ----------
+node_modules/
+.pnpm-store/
+.yarn/cache/
+.yarn/install-state.gz
+
+# ---------- 构建产物（可由 npm run build / build:site 重新生成）----------
+dist/
+dist-site/
+dist-ssr/
+.vite/
+.cache/
+coverage/
+*.tgz
+*lock.json
+
+# ---------- 日志 ----------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ---------- 环境变量与密钥 ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---------- 编辑器 / 操作系统 ----------
+.idea/
+!.idea/.gitignore
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 本地调试产物 ----------
+.screenshots/
