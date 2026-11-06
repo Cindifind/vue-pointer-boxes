@@ -1,6 +1,6 @@
 {
   "name": "vue-pointer-boxes",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Vue component: simulated cursors roam the page, then drag elements open from their corners and type text in on scroll.",
   "type": "module",
   "main": "./dist/vue-pointer-boxes.umd.cjs",
